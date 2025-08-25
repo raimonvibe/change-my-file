@@ -11,7 +11,7 @@ import { put } from '@vercel/blob'
 
 export const runtime = 'nodejs'
 
-let cachedClient: MongoClient | null = null
+let cachedClient = null
 
 async function connectToDatabase() {
   if (cachedClient) {
