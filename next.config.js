@@ -1,37 +1,58 @@
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+
   images: {
     unoptimized: true,
   },
+
   experimental: {
-    // Remove if not using Server Components
+    // Alleen nodig als je RSC gebruikt en externe packages wilt toelaten
     serverComponentsExternalPackages: ['mongodb'],
+
+    // Zorg dat Vercel deze bestanden meeneemt in de serverless bundle
+    outputFileTracingIncludes: {
+      // sleutel = route-pad zonder extensie
+      '/app/api/convert/route': [
+        './test/data/05-versions-space.pdf',
+        // of een hele map:
+        // './test/data/**'
+      ],
+    },
   },
+
   webpack(config, { dev }) {
     if (dev) {
-      // Reduce CPU/memory from file watching
       config.watchOptions = {
-        poll: 2000, // check every 2 seconds
-        aggregateTimeout: 300, // wait before rebuilding
+        poll: 2000,
+        aggregateTimeout: 300,
         ignored: ['**/node_modules'],
       };
     }
     return config;
   },
+
   onDemandEntries: {
     maxInactiveAge: 10000,
     pagesBufferLength: 2,
   },
+
   async headers() {
     return [
       {
-        source: "/(.*)",
+        source: '/(.*)',
         headers: [
-          { key: "X-Frame-Options", value: "ALLOWALL" },
-          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
-          { key: "Access-Control-Allow-Origin", value: process.env.CORS_ORIGINS || "*" },
-          { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, OPTIONS" },
-          { key: "Access-Control-Allow-Headers", value: "*" },
+          // Let op: 'ALLOWALL' is géén geldige X-Frame-Options waarde.
+          // Gebruik de CSP 'frame-ancestors' (staat hieronder) als truth.
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+
+          // Je staat alles toe met '*'; dat is heel open. Pas aan indien nodig.
+          { key: 'Content-Security-Policy', value: 'frame-ancestors *;' },
+
+          // Let op: '*' werkt niet in combinatie met credentials/cookies.
+          { key: 'Access-Control-Allow-Origin', value: process.env.CORS_ORIGINS || '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: '*' },
         ],
       },
     ];
