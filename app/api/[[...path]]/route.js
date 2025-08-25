@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import multer from 'multer'
-import { promisify } from 'util'
 import fs from 'fs/promises'
 import path from 'path'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
-import { fromPath } from 'pdf2pic'
 
 // MongoDB connection
 let cachedClient = null
@@ -28,16 +25,6 @@ async function connectToDatabase() {
   return { client, db }
 }
 
-// File upload setup
-const upload = multer({
-  dest: '/tmp/uploads/',
-  limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50000000 // 50MB default
-  }
-})
-
-const uploadSingle = promisify(upload.single('file'))
-
 // File conversion functions
 async function convertDocxToTxt(filePath) {
   try {
@@ -55,24 +42,6 @@ async function convertPdfToTxt(filePath) {
     return data.text
   } catch (error) {
     throw new Error('Failed to convert PDF to TXT: ' + error.message)
-  }
-}
-
-async function convertPdfToImages(filePath, outputDir) {
-  try {
-    const convertInstance = fromPath(filePath, {
-      density: 100,
-      saveFilename: "page",
-      savePath: outputDir,
-      format: "png",
-      width: 800,
-      height: 1000
-    })
-    
-    const results = await convertInstance.bulk(-1, { responseType: "image" })
-    return results.map(result => result.path)
-  } catch (error) {
-    throw new Error('Failed to convert PDF to images: ' + error.message)
   }
 }
 
