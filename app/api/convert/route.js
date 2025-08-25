@@ -108,33 +108,45 @@ export async function POST(request) {
     const outPath = path.join(convertedDir, `${fileId}${outputExt}`)
     await fsp.writeFile(outPath, outputText, outputExt === '.txt' ? 'utf-8' : undefined)
 
-    // Upload het resultaat naar GridFS (persistente opslag)
+
+    // Buffer voor upload naar GridFS
     const gridBuffer = outputExt === '.txt'
       ? Buffer.from(outputText, 'utf-8')
-      : await fsp.readFile(outPath) // placeholder PDF
-    const gridId = await uploadBufferToGridFS(
-      db,
-      gridBuffer,
-      outputFilename,
-      outputMime,
-      { originalFilename: originalName, ownerUserId: userId, conversionType }
-    )
-
-    const downloadUrl = `/api/download/${gridId.toString()}`
-
-    // Bewaar record (handig voor audit/logs)
-    const stat = await fsp.stat(inputPath).catch(() => ({ size: null }))
+      : await fsp.readFile(outPath) // (placeholder PDF)
+    
+    // Upload naar GridFS
+    const bucket = new GridFSBucket(db, { bucketName: 'conversions' })
+    const uploadStream = bucket.openUploadStream(outputFilename, {
+      metadata: {
+        mime: outputExt === '.txt'
+          ? 'text/plain; charset=utf-8'
+          : 'application/pdf',
+        originalFilename: originalName,
+        ownerUserId: userId,
+        conversionType,
+      },
+    })
+    await new Promise((resolve, reject) => {
+      Readable.from(gridBuffer).pipe(uploadStream)
+        .on('error', reject)
+        .on('finish', resolve)
+    })
+    const gridId = uploadStream.id
+    
+    // ✅ Gebruik het UUID fileId in je download-URL
+    const downloadUrl = `/api/download/${fileId}`
+    
+    // Conversions-record opslaan
     await db.collection('conversions').insertOne({
-      fileId,
+      fileId,                     // uuid
       userId,
       originalFilename: originalName,
       outputFilename,
       conversionType,
       status: 'completed',
       storage: 'gridfs',
-      gridFsId: gridId,
-      downloadUrl,
-      inputSize: stat.size,
+      gridFsId: gridId,           // ✅ mapping naar GridFS-bestand
+      downloadUrl,                // ✅ /api/download/<fileId>
       createdAt: new Date(),
       downloadCount: 0,
     })
