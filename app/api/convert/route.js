@@ -1,4 +1,3 @@
-// app/api/convert/route.js
 import { NextResponse } from 'next/server'
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
@@ -15,16 +14,10 @@ export const runtime = 'nodejs'
 let cachedClient = null
 
 async function connectToDatabase() {
-  if (!process.env.MONGO_URL) {
-    throw new Error('MONGO_URL is not defined')
-  }
-  if (!process.env.DB_NAME) {
-    throw new Error('DB_NAME is not defined')
-  }
+  if (!process.env.MONGO_URL) throw new Error('MONGO_URL is not defined')
+  if (!process.env.DB_NAME) throw new Error('DB_NAME is not defined')
 
-  if (cachedClient) {
-    return { client: cachedClient, db: cachedClient.db(process.env.DB_NAME) }
-  }
+  if (cachedClient) return { client: cachedClient, db: cachedClient.db(process.env.DB_NAME) }
   const client = new MongoClient(process.env.MONGO_URL)
   await client.connect()
   cachedClient = client
@@ -33,8 +26,7 @@ async function connectToDatabase() {
 
 async function streamFileToTmp(file, destPath) {
   await fsp.mkdir(path.dirname(destPath), { recursive: true })
-  // Web ReadableStream -> Node Readable via fromWeb (Node 18+)
-  const readable = Readable.fromWeb(file.stream())
+  const readable = Readable.fromWeb(file.stream()) // Web → Node stream
   const writable = createWriteStream(destPath)
   await pipeline(readable, writable)
 }
@@ -53,15 +45,12 @@ async function convertPdfToTxt(filePath) {
 export async function POST(request) {
   try {
     const { db } = await connectToDatabase()
-
     const formData = await request.formData()
     const file = formData.get('file')
     const conversionType = String(formData.get('conversionType') || '')
     const userId = String(formData.get('userId') || 'anonymous')
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 })
-    }
+    if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     if (!['docx-to-txt', 'pdf-to-txt', 'txt-to-pdf'].includes(conversionType)) {
       return NextResponse.json({ error: 'Unsupported conversion type' }, { status: 400 })
     }
@@ -92,33 +81,27 @@ export async function POST(request) {
       outputFilename = originalName.replace(/\.pdf$/i, '.txt')
     } else if (conversionType === 'txt-to-pdf') {
       if (ext !== '.txt') throw new Error('Invalid file type for TXT to PDF conversion')
+      // Placeholder: inhoud blijft tekst; voor echte PDF later lib toevoegen
       outputText = await fsp.readFile(inputPath, 'utf-8')
       outputFilename = originalName.replace(/\.txt$/i, '.pdf')
-      outputExt = '.pdf' // nog steeds placeholder inhoud
+      outputExt = '.pdf'
     }
 
     const outPath = path.join(convertedDir, `${fileId}${outputExt}`)
     await fsp.writeFile(outPath, outputText, outputExt === '.txt' ? 'utf-8' : undefined)
 
-    // Persistente download-URL via Vercel Blob (zet BLOB_READ_WRITE_TOKEN in je env)
-    let downloadUrl = null
-    try {
-      const blobRes = await put(
-        `conversions/${fileId}${outputExt}`,
-        await fsp.readFile(outPath),
-        {
-          access: 'public',
-          contentType: outputExt === '.txt' ? 'text/plain; charset=utf-8' : 'application/pdf',
-        }
-      )
-      downloadUrl = blobRes.url
-    } catch {
-      // Fallback: inline base64 (noodoplossing)
-      const outBuf = await fsp.readFile(outPath)
-      const b64 = outBuf.toString('base64')
-      const mime = outputExt === '.txt' ? 'text/plain' : 'application/pdf'
-      downloadUrl = `data:${mime};base64,${b64}`
-    }
+    // Upload naar Vercel Blob → publieke, persistente URL
+    const blob = await put(
+      `conversions/${fileId}${outputExt}`,
+      await fsp.readFile(outPath),
+      {
+        access: 'public',
+        contentType: outputExt === '.txt'
+          ? 'text/plain; charset=utf-8'
+          : 'application/pdf',
+      }
+    )
+    const downloadUrl = blob.url
 
     const stat = await fsp.stat(inputPath).catch(() => ({ size: null }))
 
@@ -129,7 +112,7 @@ export async function POST(request) {
       outputFilename,
       conversionType,
       status: 'completed',
-      storage: downloadUrl && downloadUrl.startsWith('http') ? 'vercel-blob' : 'inline',
+      storage: 'vercel-blob',
       downloadUrl,
       inputSize: stat.size,
       createdAt: new Date(),
