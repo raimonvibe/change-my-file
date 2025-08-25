@@ -7,7 +7,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
-import { convert } from 'pdf2pic'
+import { fromPath } from 'pdf2pic'
 
 // MongoDB connection
 let cachedClient = null
