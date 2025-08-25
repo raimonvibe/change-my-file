@@ -176,15 +176,8 @@ export async function POST(request) {
             break
 
           case 'pdf-to-images':
-            if (fileExtension !== '.pdf') {
-              throw new Error('Invalid file type for PDF to Images conversion')
-            }
-            const imageDir = path.join(convertedDir, fileId)
-            await fs.mkdir(imageDir, { recursive: true })
-            const imagePaths = await convertPdfToImages(filePath, imageDir)
-            outputPath = imageDir
-            outputFilename = `${fileName.replace('.pdf', '')}_images.zip`
-            break
+            // Temporarily disabled due to dependency issues
+            throw new Error('PDF to Images conversion temporarily unavailable')
 
           case 'txt-to-pdf':
             // For now, return the text content (would need additional PDF generation library)
