@@ -60,7 +60,7 @@ async function convertPdfToTxt(filePath) {
 
 async function convertPdfToImages(filePath, outputDir) {
   try {
-    const convertInstance = convert(filePath, {
+    const convertInstance = fromPath(filePath, {
       density: 100,
       saveFilename: "page",
       savePath: outputDir,
