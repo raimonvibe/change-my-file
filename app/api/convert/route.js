@@ -1,9 +1,10 @@
-// app/api/convert/route.ts
+// app/api/convert/route.js
 import { NextResponse } from 'next/server'
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { createWriteStream, promises as fsp } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
+import { Readable } from 'node:stream'
 import path from 'node:path'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
@@ -14,43 +15,47 @@ export const runtime = 'nodejs'
 let cachedClient = null
 
 async function connectToDatabase() {
+  if (!process.env.MONGO_URL) {
+    throw new Error('MONGO_URL is not defined')
+  }
+  if (!process.env.DB_NAME) {
+    throw new Error('DB_NAME is not defined')
+  }
+
   if (cachedClient) {
     return { client: cachedClient, db: cachedClient.db(process.env.DB_NAME) }
   }
-  if (!process.env.MONGO_URL) {
-  throw new Error("MONGO_URL is not defined in environment")
-}
   const client = new MongoClient(process.env.MONGO_URL)
-
   await client.connect()
   cachedClient = client
   return { client, db: client.db(process.env.DB_NAME) }
 }
 
-async function streamFileToTmp(file: File, destPath: string) {
+async function streamFileToTmp(file, destPath) {
   await fsp.mkdir(path.dirname(destPath), { recursive: true })
-  const readable = file.stream() as unknown as NodeJS.ReadableStream
+  // Web ReadableStream -> Node Readable via fromWeb (Node 18+)
+  const readable = Readable.fromWeb(file.stream())
   const writable = createWriteStream(destPath)
   await pipeline(readable, writable)
 }
 
-async function convertDocxToTxt(filePath: string) {
+async function convertDocxToTxt(filePath) {
   const result = await mammoth.extractRawText({ path: filePath })
   return result.value
 }
 
-async function convertPdfToTxt(filePath: string) {
+async function convertPdfToTxt(filePath) {
   const dataBuffer = await fsp.readFile(filePath)
-  const data = await pdfParse(dataBuffer as unknown as Buffer)
+  const data = await pdfParse(dataBuffer)
   return data.text
 }
 
-export async function POST(request: Request) {
+export async function POST(request) {
   try {
     const { db } = await connectToDatabase()
 
     const formData = await request.formData()
-    const file = formData.get('file') as File | null
+    const file = formData.get('file')
     const conversionType = String(formData.get('conversionType') || '')
     const userId = String(formData.get('userId') || 'anonymous')
 
@@ -71,70 +76,66 @@ export async function POST(request: Request) {
     const ext = path.extname(originalName).toLowerCase()
     const inputPath = path.join(uploadDir, `${fileId}${ext}`)
 
-    // Stream naar /tmp (RAM-vriendelijk)
     await streamFileToTmp(file, inputPath)
 
     let outputText = ''
     let outputFilename = ''
     let outputExt = '.txt'
 
-    switch (conversionType) {
-      case 'docx-to-txt':
-        if (ext !== '.docx') throw new Error('Invalid file type for DOCX to TXT conversion')
-        outputText = await convertDocxToTxt(inputPath)
-        outputFilename = originalName.replace(/\.docx$/i, '.txt')
-        break
-      case 'pdf-to-txt':
-        if (ext !== '.pdf') throw new Error('Invalid file type for PDF to TXT conversion')
-        outputText = await convertPdfToTxt(inputPath)
-        outputFilename = originalName.replace(/\.pdf$/i, '.txt')
-        break
-      case 'txt-to-pdf':
-        if (ext !== '.txt') throw new Error('Invalid file type for TXT to PDF conversion')
-        // Placeholder: we geven de tekst terug en noemen het .pdf voor nu
-        outputText = await fsp.readFile(inputPath, 'utf-8')
-        outputFilename = originalName.replace(/\.txt$/i, '.pdf')
-        outputExt = '.pdf'
-        break
+    if (conversionType === 'docx-to-txt') {
+      if (ext !== '.docx') throw new Error('Invalid file type for DOCX to TXT conversion')
+      outputText = await convertDocxToTxt(inputPath)
+      outputFilename = originalName.replace(/\.docx$/i, '.txt')
+    } else if (conversionType === 'pdf-to-txt') {
+      if (ext !== '.pdf') throw new Error('Invalid file type for PDF to TXT conversion')
+      outputText = await convertPdfToTxt(inputPath)
+      outputFilename = originalName.replace(/\.pdf$/i, '.txt')
+    } else if (conversionType === 'txt-to-pdf') {
+      if (ext !== '.txt') throw new Error('Invalid file type for TXT to PDF conversion')
+      outputText = await fsp.readFile(inputPath, 'utf-8')
+      outputFilename = originalName.replace(/\.txt$/i, '.pdf')
+      outputExt = '.pdf' // nog steeds placeholder inhoud
     }
 
     const outPath = path.join(convertedDir, `${fileId}${outputExt}`)
     await fsp.writeFile(outPath, outputText, outputExt === '.txt' ? 'utf-8' : undefined)
 
-    // Persistente download-URL regelen
-    let downloadUrl: string | null = null
+    // Persistente download-URL via Vercel Blob (zet BLOB_READ_WRITE_TOKEN in je env)
+    let downloadUrl = null
     try {
-      // Vercel Blob (zet BLOB_READ_WRITE_TOKEN als env var in Vercel)
-      const blobRes = await put(`conversions/${fileId}${outputExt}`, await fsp.readFile(outPath), {
-        access: 'public',
-        contentType: outputExt === '.txt' ? 'text/plain; charset=utf-8' : 'application/pdf',
-      })
+      const blobRes = await put(
+        `conversions/${fileId}${outputExt}`,
+        await fsp.readFile(outPath),
+        {
+          access: 'public',
+          contentType: outputExt === '.txt' ? 'text/plain; charset=utf-8' : 'application/pdf',
+        }
+      )
       downloadUrl = blobRes.url
     } catch {
-      // Fallback: stuur inline base64 terug (niet ideaal, maar werkt zonder blob storage)
+      // Fallback: inline base64 (noodoplossing)
       const outBuf = await fsp.readFile(outPath)
       const b64 = outBuf.toString('base64')
-      downloadUrl = `data:${outputExt === '.txt' ? 'text/plain' : 'application/pdf'};base64,${b64}`
+      const mime = outputExt === '.txt' ? 'text/plain' : 'application/pdf'
+      downloadUrl = `data:${mime};base64,${b64}`
     }
 
-    const stat = await fsp.stat(inputPath).catch(() => ({ size: 0 } as any))
+    const stat = await fsp.stat(inputPath).catch(() => ({ size: null }))
 
-    const record = {
+    await db.collection('conversions').insertOne({
       fileId,
       userId,
       originalFilename: originalName,
       outputFilename,
       conversionType,
-      status: 'completed' as const,
-      storage: downloadUrl?.startsWith('http') ? 'vercel-blob' : 'inline',
+      status: 'completed',
+      storage: downloadUrl && downloadUrl.startsWith('http') ? 'vercel-blob' : 'inline',
       downloadUrl,
-      inputSize: stat.size || (file as any).size || null,
+      inputSize: stat.size,
       createdAt: new Date(),
       downloadCount: 0,
-    }
-    await db.collection('conversions').insertOne(record)
+    })
 
-    // Opruimen van /tmp
     await Promise.allSettled([fsp.unlink(inputPath), fsp.unlink(outPath)])
 
     return NextResponse.json({
@@ -144,7 +145,7 @@ export async function POST(request: Request) {
       outputFilename,
       downloadUrl,
     })
-  } catch (err: any) {
+  } catch (err) {
     console.error('Convert API Error:', err)
     return NextResponse.json({ error: err?.message || 'Internal server error' }, { status: 500 })
   }
