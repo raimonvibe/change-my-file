@@ -1,5 +1,8 @@
 ![App banner](./file.png)
 
+🌐 **Live demo:** [change-my-file.vercel.app](https://change-my-file.vercel.app/)
+
+
 # Change-My-File ✨🗂️⚡
 
 A modern, full-stack file conversion & management app. Upload a file, convert it to the format you need, and download it—fast and secure. Built with a clean Next.js UI, MongoDB for persistence, and optional Stripe billing for premium conversions.
