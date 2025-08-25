@@ -56,21 +56,6 @@ export async function GET(request) {
     const { db } = await connectToDatabase()
 
     if (path === '/stats') {
-      // Get conversion statistics
-      const stats = await db.collection('conversions').aggregate([
-        {
-          $group: {
-            _id: '$conversionType',
-            count: { $sum: 1 }
-          }
-        }
-      ]).toArray()
-
-      const totalConversions = await db.collection('conversions').countDocuments()
-
-      return NextResponse.json({ stats, totalConversions })
-    }
-
     if (path === '/conversions') {
       // Get user's conversion history
       const userId = request.headers.get('x-user-id') || 'anonymous'
@@ -105,6 +90,22 @@ export async function GET(request) {
       } catch (error) {
         return NextResponse.json({ error: 'File not accessible' }, { status: 404 })
       }
+    }
+
+    if (path === '/stats') {
+      // Get conversion statistics
+      const stats = await db.collection('conversions').aggregate([
+        {
+          $group: {
+            _id: '$conversionType',
+            count: { $sum: 1 }
+          }
+        }
+      ]).toArray()
+
+      const totalConversions = await db.collection('conversions').countDocuments()
+
+      return NextResponse.json({ stats, totalConversions })
     }
 
     return NextResponse.json({ message: 'API endpoint not found' }, { status: 404 })
