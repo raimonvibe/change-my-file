@@ -56,6 +56,7 @@ export async function GET(request) {
     const { db } = await connectToDatabase()
 
     if (path === '/stats') {
+    if (path === '/conversions') {
       // Get user's conversion history
       const userId = request.headers.get('x-user-id') || 'anonymous'
       const conversions = await db.collection('conversions')
