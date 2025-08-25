@@ -50,10 +50,12 @@ export async function GET(request) {
   const { pathname } = new URL(request.url)
   const path = pathname.replace('/api', '')
 
+  console.log('GET request - pathname:', pathname, 'path:', path)
+
   try {
     const { db } = await connectToDatabase()
 
-    if (path === '/conversions') {
+    if (path === '/stats') {
       // Get user's conversion history
       const userId = request.headers.get('x-user-id') || 'anonymous'
       const conversions = await db.collection('conversions')
