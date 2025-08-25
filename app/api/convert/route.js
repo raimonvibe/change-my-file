@@ -17,7 +17,11 @@ async function connectToDatabase() {
   if (cachedClient) {
     return { client: cachedClient, db: cachedClient.db(process.env.DB_NAME) }
   }
-  const client = new MongoClient(process.env.MONGO_URL as string)
+  if (!process.env.MONGO_URL) {
+  throw new Error("MONGO_URL is not defined in environment")
+}
+  const client = new MongoClient(process.env.MONGO_URL)
+
   await client.connect()
   cachedClient = client
   return { client, db: client.db(process.env.DB_NAME) }
