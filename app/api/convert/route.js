@@ -1,5 +1,6 @@
+// app/api/convert/route.js
 import { NextResponse } from 'next/server'
-import { MongoClient } from 'mongodb'
+import { MongoClient, GridFSBucket } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { createWriteStream, promises as fsp } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
@@ -7,7 +8,6 @@ import { Readable } from 'node:stream'
 import path from 'node:path'
 import mammoth from 'mammoth'
 import pdfParse from 'pdf-parse'
-import { put } from '@vercel/blob'
 
 export const runtime = 'nodejs'
 
@@ -42,9 +42,24 @@ async function convertPdfToTxt(filePath) {
   return data.text
 }
 
+async function uploadBufferToGridFS(db, buffer, filename, mime, metadata = {}) {
+  const bucket = new GridFSBucket(db, { bucketName: 'conversions' })
+  const uploadStream = bucket.openUploadStream(filename, {
+    metadata: { ...metadata, mime },
+  })
+  await new Promise((resolve, reject) => {
+    Readable.from(buffer).pipe(uploadStream)
+      .on('error', reject)
+      .on('finish', resolve)
+  })
+  // Het _id van het GridFS-bestand
+  return uploadStream.id
+}
+
 export async function POST(request) {
   try {
     const { db } = await connectToDatabase()
+
     const formData = await request.formData()
     const file = formData.get('file')
     const conversionType = String(formData.get('conversionType') || '')
@@ -65,11 +80,13 @@ export async function POST(request) {
     const ext = path.extname(originalName).toLowerCase()
     const inputPath = path.join(uploadDir, `${fileId}${ext}`)
 
+    // RAM-vriendelijk streamen naar /tmp
     await streamFileToTmp(file, inputPath)
 
     let outputText = ''
     let outputFilename = ''
     let outputExt = '.txt'
+    let outputMime = 'text/plain; charset=utf-8'
 
     if (conversionType === 'docx-to-txt') {
       if (ext !== '.docx') throw new Error('Invalid file type for DOCX to TXT conversion')
@@ -81,30 +98,32 @@ export async function POST(request) {
       outputFilename = originalName.replace(/\.pdf$/i, '.txt')
     } else if (conversionType === 'txt-to-pdf') {
       if (ext !== '.txt') throw new Error('Invalid file type for TXT to PDF conversion')
-      // Placeholder: inhoud blijft tekst; voor echte PDF later lib toevoegen
+      // Placeholder: je levert “pdf” als tekstinhoud; voor echte PDF straks een lib gebruiken
       outputText = await fsp.readFile(inputPath, 'utf-8')
       outputFilename = originalName.replace(/\.txt$/i, '.pdf')
       outputExt = '.pdf'
+      outputMime = 'application/pdf'
     }
 
     const outPath = path.join(convertedDir, `${fileId}${outputExt}`)
     await fsp.writeFile(outPath, outputText, outputExt === '.txt' ? 'utf-8' : undefined)
 
-    // Upload naar Vercel Blob → publieke, persistente URL
-    const blob = await put(
-      `conversions/${fileId}${outputExt}`,
-      await fsp.readFile(outPath),
-      {
-        access: 'public',
-        contentType: outputExt === '.txt'
-          ? 'text/plain; charset=utf-8'
-          : 'application/pdf',
-      }
+    // Upload het resultaat naar GridFS (persistente opslag)
+    const gridBuffer = outputExt === '.txt'
+      ? Buffer.from(outputText, 'utf-8')
+      : await fsp.readFile(outPath) // placeholder PDF
+    const gridId = await uploadBufferToGridFS(
+      db,
+      gridBuffer,
+      outputFilename,
+      outputMime,
+      { originalFilename: originalName, ownerUserId: userId, conversionType }
     )
-    const downloadUrl = blob.url
 
+    const downloadUrl = `/api/download/${gridId.toString()}`
+
+    // Bewaar record (handig voor audit/logs)
     const stat = await fsp.stat(inputPath).catch(() => ({ size: null }))
-
     await db.collection('conversions').insertOne({
       fileId,
       userId,
@@ -112,13 +131,15 @@ export async function POST(request) {
       outputFilename,
       conversionType,
       status: 'completed',
-      storage: 'vercel-blob',
+      storage: 'gridfs',
+      gridFsId: gridId,
       downloadUrl,
       inputSize: stat.size,
       createdAt: new Date(),
       downloadCount: 0,
     })
 
+    // Opruimen
     await Promise.allSettled([fsp.unlink(inputPath), fsp.unlink(outPath)])
 
     return NextResponse.json({
