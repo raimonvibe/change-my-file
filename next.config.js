@@ -9,16 +9,6 @@ const nextConfig = {
   experimental: {
     // Alleen nodig als je RSC gebruikt en externe packages wilt toelaten
     serverComponentsExternalPackages: ['mongodb'],
-
-    // Zorg dat Vercel deze bestanden meeneemt in de serverless bundle
-    outputFileTracingIncludes: {
-      // sleutel = route-pad zonder extensie
-      '/app/api/convert/route': [
-        './test/data/05-versions-space.pdf',
-        // of een hele map:
-        // './test/data/**'
-      ],
-    },
   },
 
   webpack(config, { dev }) {
