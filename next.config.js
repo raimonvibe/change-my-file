@@ -6,10 +6,9 @@ const nextConfig = {
     unoptimized: true,
   },
 
-  experimental: {
-    // Alleen nodig als je RSC gebruikt en externe packages wilt toelaten
-    serverComponentsExternalPackages: ['mongodb'],
-  },
+  // Next 15: was experimental.serverComponentsExternalPackages.
+  // pdf-parse leest bij bundelen een testbestand in; extern laden voorkomt dat.
+  serverExternalPackages: ['mongodb', 'pdf-parse'],
 
   webpack(config, { dev }) {
     if (dev) {
